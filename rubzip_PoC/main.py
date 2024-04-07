@@ -16,16 +16,13 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
+config = st.sidebar()
 main_block = st.empty()
-dataset = st.empty()
-col1, col2 = st.columns(2)
 
-with main_block:
+with config:
     all_cols = list(data.columns)
     select_cols = st.multiselect('SELECT columns:', all_cols, default=all_cols)
     out = select(data, select_cols)
-
-with col1:
     st.write("Filter:")
     num_cols = get_numeric_cols(out)
     for col in num_cols:
@@ -39,9 +36,8 @@ with col1:
         funcs = st.multiselect('Functions:', ['sum', 'min', 'max'], default=['sum'])
         out = group(out, by, funcs)
 
-dataset.write(out)
-
-with col2:
+with main_block:
+    st.write(out)
     st.write(describe(out))
     if len(by)==0:
         st.write(info(out))
