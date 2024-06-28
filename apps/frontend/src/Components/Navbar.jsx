@@ -1,23 +1,46 @@
 //import React from "react";
+import { Link } from "react-router-dom";
+import PropTypes from 'prop-types'
 
-const Navbar = () => {
+const Navbar = ({ isSmall }) => {
   return (
-    <div className="bg-purple-400 flex p-4 ">
-      <div className="text-black font-semibold text-lg flex items-center ml-10">
-        DataLoom
+    <div
+      className={`bg-purple-400 flex p-4 transition-all duration-300 ${
+        isSmall ? "h-12" : "h-16"
+      }`}
+    >
+      <div
+        className={`text-black font-semibold ${
+          isSmall ? "text-base" : "text-lg"
+        } flex items-center ml-4 md:ml-10`}
+      >
+        <Link to="/">DataLoom</Link>
       </div>
-      {/* <div className="flex-grow mx-4">
-        <input
-          type="text"
-          placeholder=""
-          className="w-full py-2 px-4 rounded-full focus:outline-none"
-        />
-      </div> */}
+      {isSmall && (<div
+        className={`text-black font-semibold ${
+          isSmall ? "text-base" : "text-lg"
+        } flex items-center ml-auto mr-4`}
+      >
+        Project Name -- XYZ
+      </div>
+      )}
       <div className="ml-auto text-black items-end">
-        <button className="bg-white rounded-full py-2 px-4">Profile</button>
+        <button
+          className={`bg-white rounded-full ${
+            isSmall ? "py-1 px-3 text-sm" : "py-2 px-4"
+          }`}
+        >
+          Profile
+        </button>
       </div>
     </div>
   );
 };
+
+Navbar.PropTypes = {
+  isSmall:PropTypes.bool.isRequired,
+};
+
+
 
 export default Navbar;
