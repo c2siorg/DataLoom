@@ -1,10 +1,17 @@
 // HomeScreen.js
+<<<<<<< HEAD
 import   { useState } from "react";
+=======
+import { useState } from "react";
+>>>>>>> 47d1ff3 (Fixed Navbar+Menu_Navbar+DataScreen)
 import { useNavigate } from "react-router-dom";
 
 const HomeScreen = () => {
   const [showModal, setShowModal] = useState(false);
+<<<<<<< HEAD
   const [fileUpload, setFileUpload] = useState(null)
+=======
+>>>>>>> 47d1ff3 (Fixed Navbar+Menu_Navbar+DataScreen)
   const navigate = useNavigate();
 
   const handleNewProjectClick = () => {
@@ -16,8 +23,12 @@ const HomeScreen = () => {
   };
   const handleSubmitModal = (event) => {
     event.preventDefault();
+<<<<<<< HEAD
     // pass file state to react table
     navigate('/data', {state: {file: fileUpload}});
+=======
+    navigate("/data");
+>>>>>>> 47d1ff3 (Fixed Navbar+Menu_Navbar+DataScreen)
     console.log("Submitted");
     setShowModal(false);
   };

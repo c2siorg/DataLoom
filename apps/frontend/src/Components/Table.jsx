@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 import { useEffect, useState } from "react";
 import { useLocation } from "react-router-dom";
 
@@ -7,12 +8,21 @@ const Table = () => {
   const [columns, setColumns] = useState([]);
   const [editingCell, setEditingCell] = useState(null);
   const [editValue, setEditValue] = useState("");
+=======
+import { useState } from "react";
+import { FaFileUpload } from "react-icons/fa";
+
+const Table = () => {
+  const [data, setData] = useState([]);
+  const [columns, setColumns] = useState([]);
+>>>>>>> 47d1ff3 (Fixed Navbar+Menu_Navbar+DataScreen)
   const [contextMenu, setContextMenu] = useState({
     visible: false,
     x: 0,
     y: 0,
     rowIndex: null,
     columnIndex: null,
+<<<<<<< HEAD
     type: null,
   });
 
@@ -46,6 +56,35 @@ const Table = () => {
       newData[i][0] = i + 1;
     }
 
+=======
+    type: null, // 'row' or 'column'
+  });
+
+  const handleFileUpload = (event) => {
+    const file = event.target.files[0];
+    const reader = new FileReader();
+
+    reader.onload = (e) => {
+      const text = e.target.result;
+      const lines = text.split("\n");
+      const header = ["S.no", ...lines[0].split(",")];
+      const rows = lines
+        .slice(1)
+        .map((line, index) => [index + 1, ...line.split(",")]);
+
+      setColumns(header);
+      setData(rows);
+    };
+
+    reader.readAsText(file);
+  };
+
+  const handleAddRow = (index) => {
+    const newRow = Array(columns.length).fill(""); // Create a new row with empty values
+    newRow[0] = data.length + 1; // Assign the next row number
+    const newData = [...data];
+    newData.splice(index + 1, 0, newRow); // Insert the new row after the clicked row
+>>>>>>> 47d1ff3 (Fixed Navbar+Menu_Navbar+DataScreen)
     setData(newData);
     setContextMenu({
       visible: false,
@@ -82,6 +121,7 @@ const Table = () => {
     }
   };
 
+<<<<<<< HEAD
   const handleDeleteRow = (index) => {
     const newData = [...data];
     newData.splice(index, 1);
@@ -157,6 +197,8 @@ const Table = () => {
     }
   };
 
+=======
+>>>>>>> 47d1ff3 (Fixed Navbar+Menu_Navbar+DataScreen)
   const handleRightClick = (
     event,
     rowIndex = null,
@@ -189,7 +231,24 @@ const Table = () => {
     <div className="container mx-auto p-4" onClick={handleCloseContextMenu}>
       <div className="flex justify-between items-center mb-4">
         <h1 className="text-2xl font-bold text-gray-700">Data Table</h1>
+<<<<<<< HEAD
 
+=======
+        <input
+          type="file"
+          accept=".csv"
+          className="hidden"
+          id="file-upload"
+          onChange={handleFileUpload}
+        />
+        <label
+          htmlFor="file-upload"
+          className="flex items-center cursor-pointer bg-gradient-to-r from-blue-500 to-indigo-500 text-white px-4 py-2 rounded-lg shadow-lg hover:shadow-2xl transform hover:scale-105 transition duration-300"
+        >
+          <FaFileUpload className="mr-2" />
+          Upload Dataset
+        </label>
+>>>>>>> 47d1ff3 (Fixed Navbar+Menu_Navbar+DataScreen)
         <button className="bg-blue-500 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-full">
           SAVE
         </button>
@@ -228,6 +287,7 @@ const Table = () => {
                     key={cellIndex}
                     className="py-2 px-4 border-b border-gray-300 text-sm text-gray-700"
                     onContextMenu={(e) =>
+<<<<<<< HEAD
                       handleRightClick(e, rowIndex, null, "row")
                     }
                   >
@@ -261,6 +321,13 @@ const Table = () => {
                         {cell}
                       </div>
                     )}
+=======
+                      cellIndex === 0 &&
+                      handleRightClick(e, rowIndex, null, "row")
+                    }
+                  >
+                    {cell}
+>>>>>>> 47d1ff3 (Fixed Navbar+Menu_Navbar+DataScreen)
                   </td>
                 ))}
               </tr>
@@ -269,13 +336,18 @@ const Table = () => {
         </table>
       </div>
 
+<<<<<<< HEAD
       {contextMenu.visible && contextMenu.type === "column" && (
+=======
+      {contextMenu.visible && contextMenu.type === "row" && (
+>>>>>>> 47d1ff3 (Fixed Navbar+Menu_Navbar+DataScreen)
         <div
           className="absolute bg-white border border-gray-300 rounded shadow-lg p-2"
           style={{ top: contextMenu.y, left: contextMenu.x }}
         >
           <button
             className="block w-full text-left text-sm text-blue-700 py-1 px-2 hover:bg-blue-100 rounded transition duration-300"
+<<<<<<< HEAD
             onClick={() => handleAddColumn(contextMenu.columnIndex)}
           >
             Add Column
@@ -285,17 +357,27 @@ const Table = () => {
             onClick={() => handleDeleteColumn(contextMenu.columnIndex)}
           >
             Delete Column
+=======
+            onClick={() => handleAddRow(contextMenu.rowIndex)}
+          >
+            Add Row
+>>>>>>> 47d1ff3 (Fixed Navbar+Menu_Navbar+DataScreen)
           </button>
         </div>
       )}
 
+<<<<<<< HEAD
       {contextMenu.visible && contextMenu.type === "row" && (
+=======
+      {contextMenu.visible && contextMenu.type === "column" && (
+>>>>>>> 47d1ff3 (Fixed Navbar+Menu_Navbar+DataScreen)
         <div
           className="absolute bg-white border border-gray-300 rounded shadow-lg p-2"
           style={{ top: contextMenu.y, left: contextMenu.x }}
         >
           <button
             className="block w-full text-left text-sm text-blue-700 py-1 px-2 hover:bg-blue-100 rounded transition duration-300"
+<<<<<<< HEAD
             onClick={() => handleAddRow(contextMenu.rowIndex)}
           >
             Add Row
@@ -305,6 +387,11 @@ const Table = () => {
             onClick={() => handleDeleteRow(contextMenu.rowIndex)}
           >
             Delete Row
+=======
+            onClick={() => handleAddColumn(contextMenu.columnIndex)}
+          >
+            Add Column
+>>>>>>> 47d1ff3 (Fixed Navbar+Menu_Navbar+DataScreen)
           </button>
         </div>
       )}
