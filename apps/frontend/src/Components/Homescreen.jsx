@@ -1,17 +1,13 @@
 // HomeScreen.js
-<<<<<<< HEAD
-import   { useState } from "react";
-=======
 import { useState } from "react";
->>>>>>> 47d1ff3 (Fixed Navbar+Menu_Navbar+DataScreen)
 import { useNavigate } from "react-router-dom";
+import axios from "axios";
 
 const HomeScreen = () => {
   const [showModal, setShowModal] = useState(false);
-<<<<<<< HEAD
-  const [fileUpload, setFileUpload] = useState(null)
-=======
->>>>>>> 47d1ff3 (Fixed Navbar+Menu_Navbar+DataScreen)
+  const [fileUpload, setFileUpload] = useState(null);
+  const [projectName, setProjectName] = useState("");
+  const [projectDescription, setProjectDescription] = useState("");
   const navigate = useNavigate();
 
   const handleNewProjectClick = () => {
@@ -21,15 +17,38 @@ const HomeScreen = () => {
   const handleCloseModal = () => {
     setShowModal(false);
   };
-  const handleSubmitModal = (event) => {
+  const handleSubmitModal = async (event) => {
     event.preventDefault();
-<<<<<<< HEAD
-    // pass file state to react table
-    navigate('/data', {state: {file: fileUpload}});
-=======
-    navigate("/data");
->>>>>>> 47d1ff3 (Fixed Navbar+Menu_Navbar+DataScreen)
-    console.log("Submitted");
+
+    if (!fileUpload) {
+      alert("Please select a file to upload");
+      return;
+    }
+
+    const formData = new FormData();
+    formData.append("file", fileUpload);
+    formData.append("projectName", projectName);
+    formData.append("projectDescription", projectDescription);
+
+    try {
+      const response = await axios.post(
+        "http://localhost:8000/datasets/upload",
+        formData,
+        {
+          headers: {
+            "Content-Type": "multipart/form-data",
+          },
+        }
+      );
+
+      // Navigate to the data screen with the API response data
+      navigate("/data", { state: { apiData: response.data } });
+      console.log("goign to data screen", response.data);
+    } catch (error) {
+      console.error("Error uploading file:", error);
+      alert("Error uploading file. Please try again.");
+    }
+
     setShowModal(false);
   };
 
@@ -82,7 +101,7 @@ const HomeScreen = () => {
             <input
               type="text"
               className="block w-full text-lg text-gray-900 border border-gray-300 rounded-lg cursor-text bg-gray-50 focus:outline-none mb-4"
-              onChange={handleFileUpload}
+              onChange={(e) => setProjectName(e.target.value)}
             />
             <h2 className="text-2xl font-semibold mb-4">Upload Dataset</h2>
             <input
@@ -94,9 +113,9 @@ const HomeScreen = () => {
             <input
               type="text"
               className="block w-full text-lg text-gray-900 border border-gray-300 rounded-lg cursor-text bg-gray-50 focus:outline-none mb-4"
-              onChange={handleFileUpload}
+              onChange={(e) => setProjectDescription(e.target.value)}
             />
-            <div className=" flex flex-row justify-between">
+            <div className="flex flex-row justify-between">
               <button
                 className="px-4 py-2 bg-blue-500 text-white rounded-lg"
                 onClick={handleSubmitModal}
@@ -104,7 +123,7 @@ const HomeScreen = () => {
                 Submit
               </button>
               <button
-                className="px-4 py-2 bg-red-500 text-white rounded-lg "
+                className="px-4 py-2 bg-red-500 text-white rounded-lg"
                 onClick={handleCloseModal}
               >
                 Close
