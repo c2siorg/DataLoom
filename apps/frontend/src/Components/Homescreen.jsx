@@ -1,8 +1,10 @@
 // HomeScreen.js
-import   { useState } from "react";
+import { useState } from "react";
+import { useNavigate } from "react-router-dom";
 
 const HomeScreen = () => {
   const [showModal, setShowModal] = useState(false);
+  const navigate = useNavigate();
 
   const handleNewProjectClick = () => {
     setShowModal(true);
@@ -11,7 +13,9 @@ const HomeScreen = () => {
   const handleCloseModal = () => {
     setShowModal(false);
   };
-  const handleSubmitModal = () => {
+  const handleSubmitModal = (event) => {
+    event.preventDefault();
+    navigate("/data");
     console.log("Submitted");
     setShowModal(false);
   };
