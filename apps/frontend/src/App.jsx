@@ -1,5 +1,4 @@
 
-
 import './App.css'
 import {BrowserRouter as Router, Route, Routes, useLocation} from 'react-router-dom'
 import DataScreen from './Components/DataScreen';
@@ -10,7 +9,6 @@ function App() {
   return (
     <Router>
       <AppContent />
-
 
     </Router>
   );
@@ -30,4 +28,4 @@ function AppContent(){
   );
 }
 
-export default App;
+export default App
