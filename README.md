@@ -10,7 +10,6 @@ Project is to design and implement a web-based GUI for data wrangling, aimed at 
 - `@repo/eslint-config`: `eslint` configurations (includes `eslint-config-next` and `eslint-config-prettier`)
 - `@repo/typescript-config`: `tsconfig.json`s used throughout the monorepo
 
-Each package/app is 100% [TypeScript](https://www.typescriptlang.org/).
 
 ### Utilities
 
@@ -20,11 +19,17 @@ This Turborepo has some additional tools already setup for you:
 - [ESLint](https://eslint.org/) for code linting
 - [Prettier](https://prettier.io) for code formatting
 
+
 ### Run Application
+**Set Up Environment Variables** :
+Create a `.env` file in the `apps/backend` directory and add details as per `.env.sample` file.
+
+**Dependency Issues**: Ensure all required dependencies are installed by running `pip install -r requirements.txt` in apps/backend
 
 To run all apps and packages, run the following command:
-
 ```
 cd DataLoom
 npm run dev
 ```
+
+The backend server will start and be accessible at `http://127.0.0.1:8000`.
