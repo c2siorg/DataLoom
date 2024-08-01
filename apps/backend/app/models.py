@@ -3,6 +3,12 @@ from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import relationship, sessionmaker
 from enum import Enum as PyEnum
 import datetime
+import os
+from dotenv import load_dotenv
+
+load_dotenv()
+
+DATABASE_URL = os.getenv("DATABASE_URL")
 Base = declarative_base()
 
 class OperationType(PyEnum):
@@ -71,7 +77,7 @@ class Dataset(Base):
 # Dataset.change_logs = relationship("DatasetChangeLog", order_by=DatasetChangeLog.change_log_id, back_populates="dataset")
 
 # Create engine and session
-engine = create_engine('postgresql://neondb_owner:gV5apEkmF6ry@ep-polished-rain-a101l3cb.ap-southeast-1.aws.neon.tech/neondb?sslmode=require')
+engine = create_engine('DATABASE_URL')
 Base.metadata.create_all(engine)
 Session = sessionmaker(bind=engine)
 session = Session()
