@@ -1,6 +1,9 @@
 from pydantic import BaseModel
-from typing import Optional
+from enum import Enum
+from typing import Optional, Union
 
+
+# Basic Functions
 class FilterParameters(BaseModel):
     column: str
     condition: str
@@ -16,6 +19,38 @@ class Add_or_Del_Row(BaseModel):
 class Add_or_Del_Column(BaseModel):
     index: int
     name: str
+
+class FillEmptyParams(BaseModel):
+    index: int
+
+
+# Complex Functions
+
+class DropDup(str, Enum):
+    first = 'first'
+    last = 'last'
+     
+class DropDuplicates(BaseModel):
+    columns: str
+    keep: Union[DropDup, bool]
+
+class AdvQuery(BaseModel):
+    query: str
+
+class AggFunc(str, Enum):
+    sum = 'sum'
+    mean = 'mean'
+    min = 'min'
+    max = 'max'
+    count = 'count'
+class Pivot(BaseModel):
+    index: str
+    column: str
+    value: str
+    aggfun: AggFunc
+
+
+
  
 class TransformationInput(BaseModel):
     operation_type: str
@@ -23,11 +58,15 @@ class TransformationInput(BaseModel):
     sort_params:Optional[SortParameters] = None
     row_params: Optional[Add_or_Del_Row] = None
     col_params: Optional[Add_or_Del_Column] = None
+    fill_empty_params: Optional[FillEmptyParams] = None 
+    drop_duplicate: Optional[DropDuplicates] = None
+    adv_query: Optional[AdvQuery] = None
+    pivot_query: Optional[Pivot] = None
  
 class BasicQueryResponse(BaseModel):
     dataset_id: int
     operation_type: str
-    row_count: int
+    row_count: int 
     # result: List[Dict[str, Any]]
     columns: list[str]
     rows: list[list]  # Convert dataframe rows to list of lists
