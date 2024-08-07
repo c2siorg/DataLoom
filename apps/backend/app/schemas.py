@@ -1,6 +1,7 @@
-from pydantic import BaseModel
+from pydantic import BaseModel 
 from enum import Enum
 from typing import Optional, Union
+import datetime
 
 
 # Basic Functions
@@ -50,8 +51,39 @@ class Pivot(BaseModel):
     aggfun: AggFunc
 
 
+# USER LOGS
 
- 
+class ActionTypes(str, Enum):
+    filter = 'filter'
+    sort = 'sort'
+    addRow = 'addRow'
+    delRow = 'delRow'
+    addCol = 'addCol'
+    delCol = 'delCol'
+    fillEmpty = 'fillEmpty'
+    dropDuplicate = 'dropDuplicate'
+    advQueryFilter = 'advQueryFilter'
+    pivotTables = 'pivotTables'
+class UserLogsAction(BaseModel):
+    # user_id: int
+    datasetId: int
+    actionType: ActionTypes
+class UserLogsInput(BaseModel):
+    user_actions: Optional[UserLogsAction] = None
+
+
+class CheckpointResponse(BaseModel):
+    id: int
+    message: str
+    created_at: datetime.datetime
+
+class LogResponse(BaseModel):
+    id: int
+    action_type: str
+    action_details: dict
+    timestamp: datetime.datetime
+    checkpoint_id: Optional[int]
+    applied: bool
 class TransformationInput(BaseModel):
     operation_type: str
     parameters: Optional[FilterParameters] = None

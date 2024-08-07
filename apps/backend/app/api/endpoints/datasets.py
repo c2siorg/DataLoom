@@ -6,7 +6,7 @@ import shutil
 
 router = APIRouter()
 
-# CRUD Functions
+# CRUD Functions ---------------------------------------
 def create_dataset(db: Session, filename: str, file_path: str ):
     # if user_id is None:
     #     print("User ID is None")
@@ -20,8 +20,24 @@ def create_dataset(db: Session, filename: str, file_path: str ):
 def get_dataset(db: Session, dataset_id: int):
     return db.query(models.Dataset).filter(models.Dataset.dataset_id == dataset_id).first()
 
-# function to save changes in db
+# New function to create a copy of the dataset
+def create_dataset_copy(original_path: str) -> str:
+    copy_path = original_path.replace('.csv', '_copy.csv')
+    shutil.copy2(original_path, copy_path)
+    return copy_path
 
+# New function to log transformations
+def log_transformation(db: Session, dataset_id: int, transformation_input: schemas.TransformationInput):
+    log = models.DatasetChangeLog(
+        dataset_id=dataset_id,
+        action_type=transformation_input.operation_type,
+        action_details=transformation_input.dict()
+    )
+    db.add(log)
+    db.commit()
+
+
+# function to save changes in db
 def save_dataframe_to_csv(df: pd.DataFrame, file_path: str):
     """Saves the DataFrame to a CSV file and handles potential errors."""
     try:
@@ -29,6 +45,9 @@ def save_dataframe_to_csv(df: pd.DataFrame, file_path: str):
         print("In try block, df changed", df)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error saving updated dataset: {str(e)}")
+
+# CRUD Functions ---------------------------------------
+
 
 # API Routes
 @router.post("/upload", response_model=schemas.DatasetResponse)
@@ -45,7 +64,10 @@ async def upload_dataset(file: UploadFile = File(...), db: Session = Depends(dat
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Error reading dataset: {str(e)}")
     
-    dataset = create_dataset(db, filename=file.filename, file_path=file_location)
+    #  a copy of the dataset
+    copy_location = create_dataset_copy(file_location)
+    
+    dataset = create_dataset(db, filename=file.filename, file_path=copy_location)
     
     data = {
         "filename": dataset.name,
@@ -121,13 +143,15 @@ async def transform_dataset(
         # only string with space works, everything else gives error on applying operation twice
         print("new row and index", new_row, index)
     
-        # Concatenate the new row with the original DataFrame
+         
         print("DF BEFORE", df)
 
         df = pd.concat([df.iloc[:index], new_row, df.iloc[index:]]).reset_index(drop=True)
         print("DF AFTER", df)
 
         save_dataframe_to_csv(df, dataset.file_path)
+        # Log the transformation
+        log_transformation(db, dataset_id, transformation_input)
 
     elif transformation_input.operation_type == 'delRow':
         if not transformation_input.row_params:
@@ -142,6 +166,8 @@ async def transform_dataset(
         df = df.drop(index)
 
         save_dataframe_to_csv(df, dataset.file_path)
+        # Log the transformation
+        log_transformation(db, dataset_id, transformation_input)
     
 
     elif transformation_input.operation_type == 'addCol':
@@ -162,6 +188,9 @@ async def transform_dataset(
 
         
         save_dataframe_to_csv(df, dataset.file_path)
+        # Log the transformation
+        print("Going for LOGs-> db, dataset_id, and transformation_input", db, dataset_id, transformation_input)
+        log_transformation(db, dataset_id, transformation_input)
 
     # for del col - serach col name in dataset, then remove it 
     elif transformation_input.operation_type == 'delCol':
@@ -182,6 +211,8 @@ async def transform_dataset(
         df.drop(column_name, axis=1, inplace=True)
 
         save_dataframe_to_csv(df, dataset.file_path)
+        # Log the transformation
+        log_transformation(db, dataset_id, transformation_input)
 
     elif transformation_input.operation_type == 'fillEmpty':
         if not transformation_input.fill_empty_params:
@@ -196,6 +227,8 @@ async def transform_dataset(
         df.fillna(value, inplace=True)
 
         save_dataframe_to_csv(df, dataset.file_path)
+        # Log the transformation
+        log_transformation(db, dataset_id, transformation_input)
 
     else:
         raise HTTPException(status_code=400, detail=f"Unsupported operation type: {transformation_input.operation_type}")
@@ -249,6 +282,8 @@ async def Complextransform(
         
 
         save_dataframe_to_csv(df, dataset.file_path)
+        # Log the transformation
+        log_transformation(db, dataset_id, transformation_input)
 
     # HOW TO SHOW BELOW APIs ON FRONTEND? 
     if transformation_input.operation_type == 'advQueryFilter':
@@ -297,3 +332,126 @@ async def Complextransform(
 
     print("msg to frontend from complex api", data)
     return data 
+
+
+
+# APPLY changes to original dataset
+def apply_transformation(df: pd.DataFrame, action_type: str, action_details: dict) -> pd.DataFrame:
+
+    if action_type == 'addRow':
+        index = action_details['row_params']['index']
+        new_row = pd.DataFrame([[" "] * len(df.columns)], columns=df.columns, index=[index])
+        df = pd.concat([df.iloc[:index], new_row, df.iloc[index:]]).reset_index(drop=True)
+    
+    elif action_type == 'delRow':
+        index = action_details['row_params']['index']
+        df = df.drop(index)
+    
+    elif action_type == 'addCol':
+        index = action_details['col_params']['index']
+        column_name = action_details['col_params']['name']
+        df.insert(index, column_name, None)
+    
+    elif action_type == 'delCol':
+        index = action_details['row_params']['index']
+        column_name = df.columns[index]
+        df = df.drop(column_name, axis=1)
+    
+    elif action_type == 'fillEmpty':
+        value = action_details['fill_empty_params']['index']
+        df = df.fillna(value)
+    
+    elif action_type == 'dropDuplicate':
+        columns = action_details['drop_duplicate']['columns'].split(',')
+        keep = action_details['drop_duplicate']['keep']
+        df = df.drop_duplicates(subset=columns, keep=keep)
+    
+    
+    return df
+
+# New endpoint to save changes
+@router.post("/{dataset_id}/save", response_model=schemas.DatasetResponse)
+async def save_dataset(dataset_id: int, commit_message: str, db: Session = Depends(database.get_db)):
+    dataset = get_dataset(db, dataset_id)
+    if not dataset:
+        raise HTTPException(status_code=404, detail=f"Dataset with ID {dataset_id} not found")
+
+    # Get all unapplied logs for this dataset
+    logs = db.query(models.DatasetChangeLog).filter(
+        models.DatasetChangeLog.dataset_id == dataset_id,
+        models.DatasetChangeLog.applied == False
+    ).order_by(models.DatasetChangeLog.timestamp).all()
+
+    # new checkpoint
+    new_checkpoint = models.Checkpoint(dataset_id=dataset_id, message=commit_message)
+    db.add(new_checkpoint)
+    db.flush()  # This will assign an ID to the new checkpoint
+
+    # Load original dataset
+    original_path = dataset.file_path.replace('_copy.csv', '.csv')
+    df = pd.read_csv(original_path)
+
+    # Apply and update logs
+    for log in logs:
+        df = apply_transformation(df, log.action_type, log.action_details)
+        log.applied = True
+        log.checkpoint_id = new_checkpoint.id  # Assign the new checkpoint ID to the log
+
+     
+    save_dataframe_to_csv(df, original_path)
+
+     
+    db.commit()
+
+    data = {
+        "filename": dataset.name,
+        "file_path": original_path,
+        "dataset_id": dataset.dataset_id,
+        "columns": df.columns.tolist(),
+        "row_count": len(df),
+        "rows": df.values.tolist()
+    }
+    return data
+
+# New endpoint to revert to a checkpoint
+@router.post("/{dataset_id}/revert", response_model=schemas.DatasetResponse)
+async def revert_to_checkpoint(dataset_id: int, checkpoint_id: int, db: Session = Depends(database.get_db)):
+    dataset = get_dataset(db, dataset_id)
+    if not dataset:
+        raise HTTPException(status_code=404, detail=f"Dataset with ID {dataset_id} not found")
+
+    # Load the original dataset
+    original_path = dataset.file_path.replace('_copy.csv', '.csv')
+    df = pd.read_csv(original_path)
+
+    # Get all applied logs  to the checkpoint
+    logs = db.query(models.DatasetChangeLog).filter(
+        models.DatasetChangeLog.dataset_id == dataset_id,
+        models.DatasetChangeLog.applied == True,
+        models.DatasetChangeLog.checkpoint_id <= checkpoint_id
+    ).order_by(models.DatasetChangeLog.timestamp).all()
+
+    # Apply all transformations 
+    for log in logs:
+        df = apply_transformation(df, log.action_type, log.action_details)
+
+   
+    save_dataframe_to_csv(df, dataset.file_path)
+
+    #  logs after the checkpoint as unapplied
+    db.query(models.DatasetChangeLog).filter(
+        models.DatasetChangeLog.dataset_id == dataset_id,
+        models.DatasetChangeLog.checkpoint_id > checkpoint_id
+    ).update({models.DatasetChangeLog.applied: False})
+
+    db.commit()
+
+    data = {
+        "filename": dataset.name,
+        "file_path": dataset.file_path,
+        "dataset_id": dataset.dataset_id,
+        "columns": df.columns.tolist(),
+        "row_count": len(df),
+        "rows": df.values.tolist()
+    }
+    return data
