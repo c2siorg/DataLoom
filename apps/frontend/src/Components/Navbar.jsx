@@ -1,6 +1,6 @@
 //import React from "react";
 import { Link } from "react-router-dom";
-import PropTypes from 'prop-types'
+import propTypes from 'prop-types'
 
 const Navbar = ({ isSmall }) => {
   return (
@@ -37,8 +37,8 @@ const Navbar = ({ isSmall }) => {
   );
 };
 
-Navbar.PropTypes = {
-  isSmall:PropTypes.bool.isRequired,
+Navbar.propTypes = {
+  isSmall:propTypes.bool.isRequired,
 };
 
 

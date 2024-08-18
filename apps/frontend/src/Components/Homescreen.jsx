@@ -1,14 +1,28 @@
-// HomeScreen.js
-import { useState } from "react";
+
+import React, { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
-import axios from "axios";
+import { uploadDataset, getRecentProjects, getDatasetDetails } from "../api.js";
 
 const HomeScreen = () => {
   const [showModal, setShowModal] = useState(false);
   const [fileUpload, setFileUpload] = useState(null);
   const [projectName, setProjectName] = useState("");
   const [projectDescription, setProjectDescription] = useState("");
+  const [recentProjects, setRecentProjects] = useState([]);
   const navigate = useNavigate();
+
+  useEffect(() => {
+    fetchRecentProjects();
+  }, []);
+
+  const fetchRecentProjects = async () => {
+    try {
+      const response = await getRecentProjects();
+      setRecentProjects(response.data);
+    } catch (error) {
+      console.error("Error fetching recent projects:", error);
+    }
+  };
 
   const handleNewProjectClick = () => {
     setShowModal(true);
@@ -17,6 +31,7 @@ const HomeScreen = () => {
   const handleCloseModal = () => {
     setShowModal(false);
   };
+
   const handleSubmitModal = async (event) => {
     event.preventDefault();
 
@@ -25,31 +40,50 @@ const HomeScreen = () => {
       return;
     }
 
-    const formData = new FormData();
-    formData.append("file", fileUpload);
-    formData.append("projectName", projectName);
-    formData.append("projectDescription", projectDescription);
+    if (!projectName.trim()) {
+      alert("Project Name cannot be empty");
+      return;
+    }
+
+    if (!projectDescription.trim()) {
+      alert("Project Description cannot be empty");
+      return;
+    }
+
+     const formData = new FormData();
+     formData.append("file", fileUpload);
+     formData.append("projectName", projectName);
+     formData.append("projectDescription", projectDescription);
 
     try {
-      const response = await axios.post(
-        "http://localhost:8000/datasets/upload",
-        formData,
-        {
-          headers: {
-            "Content-Type": "multipart/form-data",
-          },
-        }
+      const data = await uploadDataset(
+        fileUpload,
+        projectName,
+        projectDescription
       );
+      console.log("Backend response data:", data);
 
-      // Navigate to the data screen with the API response data
-      navigate("/data", { state: { apiData: response.data } });
-      console.log("goign to data screen", response.data);
+      const datasetId = data.dataset_id;
+      console.log("Dataset ID:", datasetId);
+
+      if (datasetId) {
+        navigate("/data", { state: { datasetId, apiData: data } });
+        console.log(
+          "Navigating to data screen with datasetId and the data:",
+          datasetId,
+          data
+        );
+      } else {
+        console.error("Dataset ID is undefined.");
+        alert("Error: Dataset ID is undefined.");
+      }
     } catch (error) {
       console.error("Error uploading file:", error);
       alert("Error uploading file. Please try again.");
     }
 
     setShowModal(false);
+    fetchRecentProjects(); // Refresh the recent projects list
   };
 
   const handleFileUpload = (event) => {
@@ -58,8 +92,30 @@ const HomeScreen = () => {
     console.log(file);
   };
 
+  const handleRecentProjectClick = async (datasetId) => {
+    try {
+      // Fetch dataset details
+      const data = await getDatasetDetails(datasetId);
+      console.log("Dataset details:", data);
+
+      // Navigate to the data screen with the fetched data
+      navigate("/data", { state: { datasetId, apiData: data } });
+    } catch (error) {
+      console.error("Error fetching dataset details:", error);
+      alert("Error fetching dataset details. Please try again.");
+    }
+  };
+
+
+  // Default project names for buttons if there are less than 3 recent projects
+  const defaultProjectNames = ["No Project", "No Project", "No Project"];
+  const projectNames = recentProjects
+    .map((project) => project.name)
+    .concat(defaultProjectNames)
+    .slice(0, 3);
+
   return (
-    <div className="flex flex-col mr-64 mt-32 items-center min-h-screen bg-white  ">
+    <div className="flex flex-col mr-64 mt-32 items-center min-h-screen bg-white">
       <div>
         <h1 className="text-5xl">
           Welcome to{" "}
@@ -80,14 +136,29 @@ const HomeScreen = () => {
         >
           New Project
         </button>
-        <button className="px-2 py-4 bg-gradient-to-r from-green-400 hover:bg-blue-600 rounded-lg shadow-lg">
-          Last Project 1
+        <button
+          className="px-2 py-4 bg-gradient-to-r from-green-400 hover:bg-blue-600 rounded-lg shadow-lg"
+          onClick={() =>
+            handleRecentProjectClick(recentProjects[0]?.dataset_id)
+          }
+        >
+          {projectNames[0]}
         </button>
-        <button className="px-2 py-4 bg-gradient-to-r from-green-400 hover:bg-blue-600 rounded-lg shadow-lg">
-          Last Project 2
+        <button
+          className="px-2 py-4 bg-gradient-to-r from-green-400 hover:bg-blue-600 rounded-lg shadow-lg"
+          onClick={() =>
+            handleRecentProjectClick(recentProjects[1]?.dataset_id)
+          }
+        >
+          {projectNames[1]}
         </button>
-        <button className="px-2 py-4 bg-gradient-to-r from-green-400 hover:bg-blue-600 rounded-lg shadow-lg">
-          Last Project 3
+        <button
+          className="px-2 py-4 bg-gradient-to-r from-green-400 hover:bg-blue-600 rounded-lg shadow-lg"
+          onClick={() =>
+            handleRecentProjectClick(recentProjects[2]?.dataset_id)
+          }
+        >
+          {projectNames[2]}
         </button>
       </div>
       {showModal && (
