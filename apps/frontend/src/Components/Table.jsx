@@ -1,7 +1,10 @@
 import { useEffect, useState } from "react";
 import { useLocation } from "react-router-dom";
+import { transformDataset } from "../api";
+import proptypes from "prop-types";
 
-const Table = () => {
+
+const Table = ({ datasetId, data: externalData }) => {
   const location = useLocation();
   const [data, setData] = useState([]);
   const [columns, setColumns] = useState([]);
@@ -17,116 +20,158 @@ const Table = () => {
   });
 
   useEffect(() => {
+    console.log("Location state:", location.state);
     if (location.state && location.state.apiData) {
       const { columns, rows } = location.state.apiData;
-      console.log("before giving col value", location.state.apiData);
+
+      // Verify the data 
+      console.log("Columns from API data:", columns);
+      console.log("Rows from API data:", rows);
+
+     
       setColumns(["S.No.", ...columns]);
-      setData(rows.map((row, index) => [index + 1, ...Object.values(row)]));
+
+     
+      const mappedRows = rows.map((row, index) => [index + 1, ...row]);
+      console.log("Mapped Rows:", mappedRows);
+
+     
+      setData(mappedRows);
     }
   }, [location.state]);
 
-  const handleAddRow = (index) => {
-    const newRow = ["", ...Array(columns.length - 1).fill("")];
-    const newData = [...data];
-    newData.splice(index + 1, 0, newRow);
-
-    // Rearrange S.No.
-    for (let i = index + 1; i < newData.length; i++) {
-      newData[i][0] = i + 1;
+  useEffect(() => {
+    if (externalData) {
+      const { columns, rows } = externalData;
+      setColumns(["S.No.", ...columns]);
+      setData(rows.map((row, index) => [index + 1, ...Object.values(row)]));
     }
+  }, [externalData]);
 
-    setData(newData);
-    setContextMenu({
-      visible: false,
-      x: 0,
-      y: 0,
-      rowIndex: null,
-      columnIndex: null,
-      type: null,
-    });
+  const handleAddRow = async (index) => {
+    console.log("In Table -> in handleaddrow = Adding row at index:", index);
+    try {
+      const response = await transformDataset(datasetId, {
+        operation_type: "addRow",
+        row_params: { index },
+      });
+      console.log("Add row response:", response.data);
+      updateTableData(response.data);
+      const { columns, rows } = response.data;
+      console.log("Columns from API data in handleadd:", columns);
+      console.log("Rows from API data in handleadd:", rows);
+      setColumns(["S.No.", ...columns]);
+      setData(rows.map((row, index) => [index + 1, ...Object.values(row)]));
+    } catch (error) {
+      console.error("Error adding row:", error);
+      alert("Failed to add row. Please try again.");
+    }
   };
 
-  const handleAddColumn = (index) => {
+  const handleAddColumn = async (index) => {
     const newColumnName = prompt("Enter column name:");
+    console.log("Adding column at index:", index, "with name:", newColumnName);
     if (newColumnName) {
-      const newColumns = [...columns];
-      newColumns.splice(index + 1, 0, newColumnName);
-
-      const newData = data.map((row) => {
-        const newRow = [...row];
-        newRow.splice(index + 1, 0, "");
-        return newRow;
-      });
-
-      setColumns(newColumns);
-      setData(newData);
-      setContextMenu({
-        visible: false,
-        x: 0,
-        y: 0,
-        rowIndex: null,
-        columnIndex: null,
-        type: null,
-      });
+      try {
+        const response = await transformDataset(datasetId, {
+          operation_type: "addCol",
+          col_params: { index, name: newColumnName },
+        });
+        console.log("Add column response:", response.data);
+        updateTableData(response.data);
+        const { columns, rows } = response.data;
+        console.log("Columns from API data in add col:", columns);
+        console.log("Rows from API data in add col:", rows);
+        setColumns(["S.No.", ...columns]);
+        setData(rows.map((row, index) => [index + 1, ...Object.values(row)]));
+      } catch (error) {
+        console.error("Error adding column:", error);
+        alert("Failed to add column. Please try again.");
+      }
     }
   };
 
-  const handleDeleteRow = (index) => {
-    const newData = [...data];
-    newData.splice(index, 1);
-
-    // Rearrange S.No.
-    for (let i = index; i < newData.length; i++) {
-      newData[i][0] = i + 1;
+  const handleDeleteRow = async (index) => {
+    console.log("Deleting row at index:", index);
+    try {
+      const response = await transformDataset(datasetId, {
+        operation_type: "delRow",
+        row_params: { index },
+      });
+      console.log("Delete row response:", response.data);
+      updateTableData(response.data);
+      const { columns, rows } = response.data;
+      console.log("Columns from API data in del col:", columns);
+      console.log("Rows from API data in del row:", rows);
+      setColumns(["S.No.", ...columns]);
+      setData(rows.map((row, index) => [index + 1, ...Object.values(row)]));
+    } catch (error) {
+      console.error("Error deleting row:", error);
+      alert("Failed to delete row. Please try again.");
     }
-
-    setData(newData);
-    setContextMenu({
-      visible: false,
-      x: 0,
-      y: 0,
-      rowIndex: null,
-      columnIndex: null,
-      type: null,
-    });
   };
 
-  const handleDeleteColumn = (index) => {
+  const handleDeleteColumn = async (index) => {
+    console.log("Deleting column at index:", index);
     if (index === 0) {
       alert("Cannot delete the S.No. column.");
       return;
     }
 
-    const newColumns = [...columns];
-    newColumns.splice(index, 1);
-
-    const newData = data.map((row) => {
-      const newRow = [...row];
-      newRow.splice(index, 1);
-      return newRow;
-    });
-
-    setColumns(newColumns);
-    setData(newData);
-    setContextMenu({
-      visible: false,
-      x: 0,
-      y: 0,
-      rowIndex: null,
-      columnIndex: null,
-      type: null,
-    });
+    // the table has 0 indexed columns, but the API expects 1 indexed columns
+     index-=1;
+     console.log("Index for API:", index);
+    try {
+      const response = await transformDataset(datasetId, {
+        operation_type: "delCol",
+        row_params: { index },
+      });
+      console.log("Delete column response:", response.data);
+      updateTableData(response.data);
+      const { columns, rows } = response.data;
+      console.log("Columns from API data in del col:", columns);
+      console.log("Rows from API data in del row:", rows);
+      setColumns(["S.No.", ...columns]);
+      setData(rows.map((row, index) => [index + 1, ...Object.values(row)]));
+    } catch (error) {
+      console.error("Error deleting column:", error);
+      alert("Failed to delete column. Please try again.");
+    }
   };
 
-  const handleEditCell = (rowIndex, cellIndex, newValue) => {
-    const newData = [...data];
-    newData[rowIndex][cellIndex] = newValue;
-    setData(newData);
-    setEditingCell(null);
-    setEditValue("");
+  const handleEditCell = async (rowIndex, cellIndex, newValue) => {
+    console.log(
+      `Editing cell at rowIndex: ${rowIndex}, cellIndex: ${cellIndex} with newValue: ${newValue}`
+    );
+    try {
+      const response = await transformDataset(datasetId, {
+        operation_type: "changeCellValue",
+        change_cell_value: {
+          col_index: cellIndex, // The column index that you want to fill
+          row_index: rowIndex, // The column index that you want to fill
+          fill_value: newValue, // The value you want to use to fill the NaNs
+        },
+      });
+      console.log("Edit cell response:", response.data);
+      updateTableData(response.data);
+      setEditingCell(null);
+      setEditValue("");
+      const { columns, rows } = response.data;
+      console.log("Columns from API data in add col:", columns);
+      console.log("Rows from API data in add col:", rows);
+      setColumns(["S.No.", ...columns]);
+      setData(rows.map((row, index) => [index + 1, ...Object.values(row)]));
+    } catch (error) {
+      console.error("Error editing cell:", error);
+      alert("Failed to edit cell. Please try again.");
+    }
   };
+
 
   const handleCellClick = (rowIndex, cellIndex, cellValue) => {
+    console.log(
+      `Cell clicked at rowIndex: ${rowIndex}, cellIndex: ${cellIndex}, value: ${cellValue}`
+    );
     if (cellIndex !== 0) {
       setEditingCell({ rowIndex, cellIndex });
       setEditValue(cellValue);
@@ -134,10 +179,12 @@ const Table = () => {
   };
 
   const handleInputChange = (e) => {
+    console.log("Input value changed:", e.target.value);
     setEditValue(e.target.value);
   };
 
   const handleInputKeyDown = (e, rowIndex, cellIndex) => {
+    console.log("Key pressed in input:", e.key);
     if (e.key === "Enter") {
       handleEditCell(rowIndex, cellIndex, editValue);
     } else if (e.key === "Escape") {
@@ -153,6 +200,9 @@ const Table = () => {
     type = null
   ) => {
     event.preventDefault();
+    console.log(
+      `Right-clicked on ${type} at rowIndex: ${rowIndex}, columnIndex: ${columnIndex}`
+    );
     setContextMenu({
       visible: true,
       x: event.clientX,
@@ -164,6 +214,7 @@ const Table = () => {
   };
 
   const handleCloseContextMenu = () => {
+    console.log("Closing context menu");
     setContextMenu({
       visible: false,
       x: 0,
@@ -174,14 +225,16 @@ const Table = () => {
     });
   };
 
+  const updateTableData = (newData) => {
+    console.log("Updating table data with:", newData);
+    setColumns(newData.columns);
+    setData(newData.rows);
+  };
+
   return (
     <div className="container mx-auto p-4" onClick={handleCloseContextMenu}>
       <div className="flex justify-between items-center mb-4">
-        <h1 className="text-2xl font-bold text-gray-700">Data Table</h1>
-
-        <button className="bg-blue-500 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-full">
-          SAVE
-        </button>
+        <h1 className="text-xl font-bold text-black">Data Table</h1>
       </div>
 
       <div className="max-h-[500px] overflow-x-scroll overflow-y-auto border border-gray-300 rounded-lg shadow">
@@ -215,7 +268,7 @@ const Table = () => {
                 {row.map((cell, cellIndex) => (
                   <td
                     key={cellIndex}
-                    className="py-2 px-4 border-b border-gray-300 text-sm text-gray-700"
+                    className="py-2 px-4 border-b border-gray-300 text-sm  text-black"
                     onContextMenu={(e) =>
                       handleRightClick(e, rowIndex, null, "row")
                     }
@@ -233,7 +286,7 @@ const Table = () => {
                         onKeyDown={(e) =>
                           handleInputKeyDown(e, rowIndex, cellIndex)
                         }
-                        autoFocus
+                        // autoFocus
                         className="w-full p-1 border border-blue-300 rounded"
                       />
                     ) : (
@@ -299,6 +352,14 @@ const Table = () => {
       )}
     </div>
   );
+};
+
+Table.propTypes = {
+  datasetId: proptypes.string.isRequired,
+  data: proptypes.shape({
+    columns: proptypes.arrayOf(proptypes.string),
+    rows: proptypes.arrayOf(proptypes.arrayOf(proptypes.string)),
+  }),
 };
 
 export default Table;

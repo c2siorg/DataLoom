@@ -22,6 +22,8 @@ build/
 dist/
 *.egg-info/
 
+uploads/
+
 # Static files
 static/
 
