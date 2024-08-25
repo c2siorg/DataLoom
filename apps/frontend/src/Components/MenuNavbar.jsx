@@ -1,4 +1,3 @@
-
 // NavBar.js
 import { useState, useEffect } from "react";
 import FilterForm from "./FilterForm";
@@ -17,7 +16,7 @@ import {
 import proptype from "prop-types";
 
 const Menu_NavBar = ({ datasetId, onTransform }) => {
-  const [activeTab, setActiveTab] = useState("Home");
+  const [activeTab, setActiveTab] = useState("File");
   const [showFilterForm, setShowFilterForm] = useState(false);
   const [showSortForm, setShowSortForm] = useState(false);
   const [showDropDuplicateForm, setShowDropDuplicateForm] = useState(false);
