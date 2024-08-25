@@ -4,29 +4,15 @@ Project is to design and implement a web-based GUI for data wrangling, aimed at 
 ### Apps and Packages
 
 - `frontend`: a React.js app
-- `Docs`: React.js app for tutorials regarding DataLoom
 - `backend`:  Python(FastAPI) app
-- `@repo/ui`: a stub React component library shared by both `web` and `docs` applications
-- `@repo/eslint-config`: `eslint` configurations (includes `eslint-config-next` and `eslint-config-prettier`)
-- `@repo/typescript-config`: `tsconfig.json`s used throughout the monorepo
-
-
-### Utilities
-
-This Turborepo has some additional tools already setup for you:
-
-- [TypeScript](https://www.typescriptlang.org/) for static type checking
-- [ESLint](https://eslint.org/) for code linting
-- [Prettier](https://prettier.io) for code formatting
-
 
 ### Run Application
 **Set Up Environment Variables** :
 Create a `.env` file in the `apps/backend` directory and add details as per `.env.sample` file.
 
-**Dependency Issues**: Ensure all required dependencies are installed by running `pip install -r requirements.txt` in apps/backend
+**Installing FastApi Backend** : In the `apps/backend` directory, run `python3 -m venv env`, then run `. env/scripts/activate` (On Windows), then ensure all required dependencies are installed by running `pip install -r requirements.txt`.
 
-To run all apps and packages, run the following command:
+**To run the project**, run the following command:
 ```
 cd DataLoom
 npm run dev

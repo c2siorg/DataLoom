@@ -104,10 +104,18 @@ async def get_dataset_details(dataset_id: int, db: Session = Depends(database.ge
         raise HTTPException(status_code=404, detail="Dataset not found")
 
     # Read the dataset file
+    # try:
+    #     df = pd.read_csv(dataset.file_path)
+    copy_path = dataset.file_path
+    print("copy_path", copy_path)
+
+    # Read the dataset file
     try:
-        df = pd.read_csv(dataset.file_path)
+        df = pd.read_csv(copy_path)
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Error reading dataset: {str(e)}")
+
+    df = df.replace([float('inf'), float('-inf'), float('nan')], " ")
 
     data = {
         "filename": dataset.name,
@@ -490,7 +498,7 @@ def apply_transformation(df: pd.DataFrame, action_type: str, action_details: dic
         if row_index >= len(df) or column_index >= len(df.columns):
             raise ValueError("Row or column index out of bounds")
         
-        column_name = df.columns[column_index]
+        column_name = df.columns[column_index - 1]
         df.at[row_index, column_name] = new_value
     
     elif action_type == 'fillEmpty':
@@ -562,8 +570,57 @@ async def save_dataset(dataset_id: int, commit_message: str, db: Session = Depen
 
 
 
+# @router.post("/{dataset_id}/revert", response_model=schemas.DatasetResponse)
+# async def revert_to_checkpoint(dataset_id: int, checkpoint_id: int = Query(...), db: Session = Depends(database.get_db)):
+#     dataset = get_dataset(db, dataset_id)
+#     if not dataset:
+#         raise HTTPException(status_code=404, detail=f"Dataset with ID {dataset_id} not found")
+
+#     # Load the original dataset
+#     original_path = dataset.file_path.replace('_copy.csv', '.csv')
+#     df = pd.read_csv(original_path)
+
+#     # Get all applied logs to the checkpoint
+#     logs = db.query(models.DatasetChangeLog).filter(
+#         models.DatasetChangeLog.dataset_id == dataset_id,
+#         models.DatasetChangeLog.applied == True,
+#         models.DatasetChangeLog.checkpoint_id <= checkpoint_id
+#     ).order_by(models.DatasetChangeLog.timestamp).all()
+
+#     # Apply all transformations
+#     for log in logs:
+#         df = apply_transformation(df, log.action_type, log.action_details)
+
+#     save_dataframe_to_csv(df, dataset.file_path)
+
+#     # Mark logs after the checkpoint as unapplied
+#     db.query(models.DatasetChangeLog).filter(
+#         models.DatasetChangeLog.dataset_id == dataset_id,
+#         models.DatasetChangeLog.checkpoint_id > checkpoint_id
+#     ).update({models.DatasetChangeLog.applied: False})
+
+#     # Delete all unapplied logs that have `checkpoint_id` as None
+#     db.query(models.DatasetChangeLog).filter(
+#         models.DatasetChangeLog.dataset_id == dataset_id,
+#         models.DatasetChangeLog.checkpoint_id == None,
+#         models.DatasetChangeLog.applied == False
+#     ).delete()
+
+#     db.commit()
+
+#     data = {
+#         "filename": dataset.name,
+#         "file_path": dataset.file_path,
+#         "dataset_id": dataset.dataset_id,
+#         "columns": df.columns.tolist(),
+#         "row_count": len(df),
+#         "rows": df.values.tolist()
+#     }
+#     return data
+
+# ABOVE WHEN MORE COPIES OF ORIGINAL DATATSET CAN BE CREATED
 @router.post("/{dataset_id}/revert", response_model=schemas.DatasetResponse)
-async def revert_to_checkpoint(dataset_id: int, checkpoint_id: int = Query(...), db: Session = Depends(database.get_db)):
+async def revert_to_checkpoint(dataset_id: int, db: Session = Depends(database.get_db)):
     dataset = get_dataset(db, dataset_id)
     if not dataset:
         raise HTTPException(status_code=404, detail=f"Dataset with ID {dataset_id} not found")
@@ -571,34 +628,14 @@ async def revert_to_checkpoint(dataset_id: int, checkpoint_id: int = Query(...),
     # Load the original dataset
     original_path = dataset.file_path.replace('_copy.csv', '.csv')
     df = pd.read_csv(original_path)
+    print("CSV on which applied", original_path)
 
-    # Get all applied logs to the checkpoint
-    logs = db.query(models.DatasetChangeLog).filter(
-        models.DatasetChangeLog.dataset_id == dataset_id,
-        models.DatasetChangeLog.applied == True,
-        models.DatasetChangeLog.checkpoint_id <= checkpoint_id
-    ).order_by(models.DatasetChangeLog.timestamp).all()
-
-    # Apply all transformations
-    for log in logs:
-        df = apply_transformation(df, log.action_type, log.action_details)
-
+    # Simply save the original dataset as _copy.csv
     save_dataframe_to_csv(df, dataset.file_path)
 
-    # Mark logs after the checkpoint as unapplied
-    db.query(models.DatasetChangeLog).filter(
-        models.DatasetChangeLog.dataset_id == dataset_id,
-        models.DatasetChangeLog.checkpoint_id > checkpoint_id
-    ).update({models.DatasetChangeLog.applied: False})
-
-    # Delete all unapplied logs that have `checkpoint_id` as None
-    db.query(models.DatasetChangeLog).filter(
-        models.DatasetChangeLog.dataset_id == dataset_id,
-        models.DatasetChangeLog.checkpoint_id == None,
-        models.DatasetChangeLog.applied == False
-    ).delete()
-
     db.commit()
+
+    df = df.replace([float('inf'), float('-inf'), float('nan')], " ")
 
     data = {
         "filename": dataset.name,
