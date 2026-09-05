@@ -142,7 +142,7 @@ const Table = ({ projectId, showColumnProfiles = false }: TableProps) => {
   // transform or cell edit but survive pagination.
   const { profiles, loading: profilesLoading } = useColumnProfiles(
     projectId,
-    showColumnProfiles,
+    showColumnProfiles && ctxColumns.length > 0,
     dataVersion,
   );
 
