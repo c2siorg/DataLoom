@@ -1,8 +1,11 @@
 """Database operations for projects, logs, and checkpoints."""
 
+import shutil
+import tempfile
 import uuid
 from collections.abc import Sequence
 from datetime import UTC, datetime
+from pathlib import Path
 
 import pandas as pd
 import sqlalchemy as sa
@@ -15,13 +18,18 @@ from app.config import get_settings
 from app.services import report_service, transformation_service
 from app.services.file_service import (
     get_original_path,
+    restore_original,
     restore_snapshot,
     take_snapshot,
     unlink_snapshots,
-    restore_original,
 )
 from app.utils.logging import get_logger
-from app.utils.pandas_helpers import save_table_safe, read_table_safe, dataframe_to_response, paginate_dataframe
+from app.utils.pandas_helpers import (
+    dataframe_to_response,
+    paginate_dataframe,
+    read_table_safe,
+    save_table_safe,
+)
 
 logger = get_logger(__name__)
 
@@ -841,39 +849,66 @@ def reset_project(
     """Reset a project to its original uploaded state and discard all history."""
 
     original_path = get_original_path(project.file_path)
-
-    # Restore the original file first. If this fails, the database remains
-    # unchanged and the current project state is preserved.
-    restore_original(original_path, project.file_path)
+    working_path = Path(project.file_path)
 
     # Collect snapshot paths before deleting the undo/redo rows.
     undo_steps = db.query(models.UndoStep).filter(models.UndoStep.project_id == project_id).all()
-
     stale_snapshots = _snapshot_paths(undo_steps)
 
+    # Back up the current working file so it can be restored if the
+    # database transaction fails.
+    with tempfile.NamedTemporaryFile(
+        dir=working_path.parent,
+        prefix=".reset-backup-",
+        suffix=working_path.suffix,
+        delete=False,
+    ) as backup_file:
+        backup_path = Path(backup_file.name)
+
     try:
-        # Change-log rows reference checkpoints and undo steps, so remove them
-        # first before deleting their parent history records.
-        db.query(models.ProjectChangeLog).filter(models.ProjectChangeLog.project_id == project_id).delete(
-            synchronize_session="fetch"
-        )
+        shutil.copy2(working_path, backup_path)
 
-        db.query(models.Checkpoint).filter(models.Checkpoint.project_id == project_id).delete(
-            synchronize_session="fetch"
-        )
+        # Restore the original dataset. This operation is atomic.
+        restore_original(original_path, str(working_path))
 
-        db.query(models.UndoStep).filter(models.UndoStep.project_id == project_id).delete(synchronize_session="fetch")
+        try:
+            # Delete change logs before their referenced history records.
+            db.query(models.ProjectChangeLog).filter(models.ProjectChangeLog.project_id == project_id).delete(
+                synchronize_session="fetch"
+            )
 
-        db.commit()
-    except SQLAlchemyError:
-        db.rollback()
-        raise
+            db.query(models.Checkpoint).filter(models.Checkpoint.project_id == project_id).delete(
+                synchronize_session="fetch"
+            )
 
-    # Snapshot files are no longer referenced after the committed deletion.
+            db.query(models.UndoStep).filter(models.UndoStep.project_id == project_id).delete(
+                synchronize_session="fetch"
+            )
+
+            db.commit()
+
+        except SQLAlchemyError:
+            db.rollback()
+
+            # The database reset failed, so restore the previous dataset.
+            try:
+                restore_original(str(backup_path), str(working_path))
+            except Exception:
+                logger.exception(
+                    "Failed to restore working file after reset transaction failed: project_id=%s",
+                    project_id,
+                )
+                raise
+
+            raise
+
+    finally:
+        backup_path.unlink(missing_ok=True)
+
+    # Only remove snapshots after the history deletion has committed.
     unlink_snapshots(stale_snapshots)
 
-    df = read_table_safe(project.file_path)
-
+    df = read_table_safe(str(working_path))
     response_df, pagination = paginate_dataframe(df, page, page_size)
     resp = dataframe_to_response(response_df)
 
