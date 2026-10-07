@@ -919,7 +919,7 @@ export function TablePagination({
   };
 
   return (
-    <div className="flex h-9 shrink-0 items-center justify-between gap-2 px-4 bg-surface text-xs sm:px-6">
+    <div className="flex h-9 shrink-0 items-center justify-between gap-2 px-4 bg-surface text-xs sm:px-6 max-sm:py-8">
       {/* Left: Total Rows + Page Size */}
       <div className="flex flex-wrap items-center gap-x-5 gap-y-1.5 text-muted-foreground">
         <div className="flex items-center gap-1.5">
@@ -963,7 +963,7 @@ export function TablePagination({
       </div>
 
       {/* Right: nav buttons + Page X of Y */}
-      <div className="flex flex-wrap items-center justify-end gap-1.5">
+      <div className="flex sm:flex-wrap items-center justify-end gap-1.5">
         <button
           onClick={handleFirst}
           disabled={page === 1 || isLoading}
@@ -999,7 +999,7 @@ export function TablePagination({
             className="h-6 w-11 rounded border border-app-border px-1 text-center text-foreground focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:cursor-not-allowed disabled:opacity-40 [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
             aria-label="Current page"
           />
-          <span className="text-muted-foreground">of {totalPages}</span>
+          <span className="text-muted-foreground min-w-fit">of {totalPages}</span>
         </div>
 
         <button
