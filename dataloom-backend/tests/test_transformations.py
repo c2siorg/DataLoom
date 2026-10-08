@@ -742,6 +742,24 @@ class TestAdvancedQuery:
         with pytest.raises(HTTPException):
             advanced_query(sample_df, "__import__('os').system('ls')")
 
+    def test_query_with_existing_backticks(self, sample_df):
+        df = sample_df.rename(columns={"name": "full name"})
+        result = advanced_query(df, '`full name` == "Alice"')
+        assert len(result) == 1
+
+    def test_query_with_apostrophe_in_string(self):
+        df = pd.DataFrame({"city": ["St. John's", "New York"]})
+        result = advanced_query(df, 'city == "St. John\'s"')
+        assert len(result) == 1
+
+    def test_query_invalid_column_raises_transformation_error(self, sample_df):
+        with pytest.raises(TransformationError):
+            advanced_query(sample_df, "invalid_column > 10")
+
+    def test_query_malformed_syntax_raises_transformation_error(self, sample_df):
+        with pytest.raises(TransformationError):
+            advanced_query(sample_df, "age >")
+
 
 class TestPivotTable:
     def test_simple_pivot(self):
