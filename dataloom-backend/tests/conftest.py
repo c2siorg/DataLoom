@@ -34,6 +34,8 @@ TEST_DATABASE_URL = "sqlite://"
 # thread its own connection, and therefore its own empty database — which the
 # blocking `def` routes would hit, since FastAPI runs them in its threadpool
 # rather than on the thread that created the schema.
+# Limitation: all test sessions share one SQLite connection, so these tests do
+# not reproduce file-backed SQLite locking or transaction isolation behavior.
 engine = create_engine(
     TEST_DATABASE_URL,
     connect_args={"check_same_thread": False},
