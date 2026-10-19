@@ -12,9 +12,9 @@ from sqlmodel import Session
 from app import database, models, schemas
 from app.api.dependencies import get_project_or_404
 from app.services import transformation_service as ts
-from app.services.project_service import commit_undoable_change
+from app.services.project_service import commit_undoable_change, get_project_column_metadata
 from app.utils.logging import get_logger
-from app.utils.pandas_helpers import dataframe_to_response, paginate_dataframe, read_table_safe
+from app.utils.pandas_helpers import dataframe_to_response, paginate_dataframe, read_table_safe, restore_semantic_dtypes
 from app.utils.project_locks import project_read_lock, project_write_lock
 from app.utils.security import safe_transformation_error_detail
 
@@ -99,7 +99,7 @@ def _transform_project(
     operation_type = getattr(transformation_input, "operation_type", "<unknown>")
 
     try:
-        df = read_table_safe(project.file_path)
+        df = restore_semantic_dtypes(read_table_safe(project.file_path), get_project_column_metadata(db, project_id))
 
         result_df = _dispatch_transform(df, transformation_input)
 

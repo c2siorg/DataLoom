@@ -190,7 +190,9 @@ class TestUndo:
 
         assert response.status_code == 200, response.text
         assert response.json()["rows"] == sorted_by_code["rows"]
-        assert [row[0] for row in response.json()["rows"]] == [9, 10, 100]
+        # The source column was semantic text. Dtype restoration keeps those
+        # edited numeric-looking values as text, so sorting remains lexical.
+        assert [row[0] for row in response.json()["rows"]] == ["10", "100", "9"]
 
     def test_undo_never_crosses_a_save(self, client, db):
         """Regression: undo deleted a saved row, changing what its checkpoint restores."""

@@ -26,6 +26,7 @@ from app.services.file_service import (
 from app.utils.logging import get_logger
 from app.utils.pandas_helpers import (
     dataframe_to_response,
+    map_dtype,
     paginate_dataframe,
     read_table_safe,
     save_table_safe,
@@ -40,6 +41,8 @@ def create_project(
     file_path: str,
     description: str,
     owner_id: uuid.UUID,
+    *,
+    commit: bool = True,
 ) -> models.Project:
     """Create a new project record in the database.
 
@@ -55,7 +58,9 @@ def create_project(
     """
     project = models.Project(owner_id=owner_id, name=name, file_path=file_path, description=description)
     db.add(project)
-    db.commit()
+    db.flush()
+    if commit:
+        db.commit()
     db.refresh(project)
     logger.info("Created project: id=%s, name=%s", project.project_id, name)
     return project
@@ -88,6 +93,56 @@ def create_project_file(
     db.refresh(project_file)
     logger.info("Added project file: id=%s, project_id=%s, name=%s", project_file.id, project_id, original_filename)
     return project_file
+
+
+def create_project_column_metadata(
+    db: Session,
+    project_id: uuid.UUID,
+    df: pd.DataFrame,
+) -> None:
+    """Persist the semantic dtype of every column in a project."""
+    if not df.columns.is_unique or len({str(column) for column in df.columns}) != len(df.columns):
+        raise ValueError("Project column labels must be unique after string normalization")
+    for column_name, dtype in df.dtypes.items():
+        db.add(
+            models.ProjectColumnMetadata(
+                project_id=project_id,
+                column_name=str(column_name),
+                column_dtype=map_dtype(dtype),
+            )
+        )
+    db.flush()
+
+
+def get_project_column_metadata(
+    db: Session,
+    project_id: uuid.UUID,
+) -> dict[str, str]:
+    """Return persisted semantic dtypes keyed by column name."""
+    rows = db.query(models.ProjectColumnMetadata).filter(models.ProjectColumnMetadata.project_id == project_id).all()
+    return {str(row.column_name): row.column_dtype for row in rows}
+
+
+def replace_project_column_metadata(
+    db: Session,
+    project_id: uuid.UUID,
+    metadata: dict[str, str],
+) -> None:
+    """Replace all persisted column metadata for a project."""
+    db.query(models.ProjectColumnMetadata).filter(models.ProjectColumnMetadata.project_id == project_id).delete(
+        synchronize_session=False
+    )
+
+    for column_name, column_dtype in metadata.items():
+        db.add(
+            models.ProjectColumnMetadata(
+                project_id=project_id,
+                column_name=str(column_name),
+                column_dtype=column_dtype,
+            )
+        )
+
+    db.flush()
 
 
 def get_project_files(db: Session, project_id: uuid.UUID) -> list[models.ProjectFile]:
@@ -271,57 +326,166 @@ def commit_undoable_change(
     project: models.Project,
     result_df: pd.DataFrame,
     entries: Sequence[tuple[str, dict]],
+    transitions: Sequence[tuple[str, dict, pd.DataFrame, pd.DataFrame]] | None = None,
 ) -> None:
-    """Write a transformed working copy and log it as one undo step.
+    """Persist a transformed working copy as one atomic undoable action.
 
-    Every logged write path (a transform, a pipeline Run, a file append) comes
-    through here, so one user action is one undo step however many change-log
-    rows it produces. The working copy is snapshotted before it is written:
-    undo restores that snapshot instead of replaying the change log, and the
-    same snapshot compensates the write if logging fails, restoring the exact
-    bytes rather than re-serializing a DataFrame.
+    The caller must hold the project's exclusive write lock. ``entries`` are
+    the operation and serialized parameters in execution order; multiple
+    entries (a pipeline) still create one undo step. The pre-change file and
+    semantic metadata are both snapshotted so undo and redo restore the exact
+    saved state. Change logs, metadata, the undo step, and the project touch
+    commit in one database transaction. If any write or commit fails, the
+    transaction is rolled back and the original file is restored.
 
-    A new step discards the redo stack, and pre-change snapshots past
-    ``undo_snapshot_limit`` are evicted. Their files are deleted only after the
-    commit that stops referencing them succeeds, so a crash can orphan a file
-    but never delete one still in use.
-
-    Must run under the project's write lock.
+    Oldest pre-change snapshots beyond ``undo_snapshot_limit`` and snapshots
+    referenced by discarded redo steps are removed only after commit succeeds.
+    A failed restoration leaves the snapshot on disk as the recovery copy.
 
     Args:
-        db: Database session.
-        project: The project being changed.
-        result_df: The new data for the working copy.
-        entries: The ``(action_type, action_details)`` pairs to log, in order.
+        db: Database session owning the transaction.
+        project: Project whose working file is being changed.
+        result_df: Final in-memory result of the transformation.
+        entries: Ordered ``(action_type, action_details)`` pairs to log.
+
+    Returns:
+        None.
 
     Raises:
-        Exception: Re-raises whatever the write or the commit failed with,
-            after putting the working copy back and rolling back.
+        Exception: Re-raises the original reconciliation, file, persistence,
+            or commit exception after rollback and best-effort file restoration.
     """
     project_id = project.project_id
     working_path = project.file_path
+    # Read once under the caller's write lock. The exact in-memory source used
+    # by reconciliation is therefore the state represented by this snapshot.
+    before_df = read_table_safe(working_path)
     before_path = take_snapshot(project_id, working_path)
     try:
+        metadata_before = get_project_column_metadata(db, project_id)
+        # Legacy or partially migrated projects are backfilled inside this
+        # transaction before the undo snapshot, so {} remains a real empty
+        # state and existing semantic rows are never overwritten.
+        inferred_metadata = {str(column): map_dtype(dtype) for column, dtype in before_df.dtypes.items()}
+        if set(inferred_metadata) - set(metadata_before):
+            metadata_before = {**inferred_metadata, **metadata_before}
+            replace_project_column_metadata(db, project_id, metadata_before)
+
+        metadata_after = metadata_before.copy()
+        if len(entries) == 1:
+            action_type, details = entries[0]
+            metadata_after = transformation_service.apply_metadata_transformation(
+                metadata_after,
+                action_type,
+                details,
+                before_df,
+                result_df,
+            )
+        elif transitions is not None:
+            for action_type, details, stage_before, stage_after in transitions:
+                metadata_after = transformation_service.apply_metadata_transformation(
+                    metadata_after,
+                    action_type,
+                    details,
+                    stage_before,
+                    stage_after,
+                )
+            metadata_after = {
+                str(column): metadata_after.get(str(column), map_dtype(result_df[column].dtype))
+                for column in result_df.columns
+            }
+        else:
+            # Reconcile each pipeline stage through the same strategy used for
+            # a single operation, then persist only the final state. The input
+            # CSV is read once; stages replay in memory from that authoritative
+            # pre-change frame.
+            stage_df = before_df
+            for action_type, details in entries:
+                try:
+                    next_df = transformation_service.apply_logged_transformation(stage_df, action_type, details)
+                except (KeyError, TypeError):
+                    # Callers outside the API may record synthetic entries
+                    # with no replay parameters. They still use the same final
+                    # reconciliation rule, against the supplied final frame.
+                    metadata_after = transformation_service.apply_metadata_transformation(
+                        metadata_after,
+                        action_type,
+                        details,
+                        before_df,
+                        result_df,
+                    )
+                    stage_df = result_df
+                    continue
+                metadata_after = transformation_service.apply_metadata_transformation(
+                    metadata_after,
+                    action_type,
+                    details,
+                    stage_df,
+                    next_df,
+                )
+                stage_df = next_df
+            # The caller's final DataFrame is authoritative (for example, a
+            # nondeterministic sample can differ from replay). Reconcile its
+            # final columns without re-reading the working file.
+            metadata_after = {
+                str(column): metadata_after.get(str(column), map_dtype(result_df[column].dtype))
+                for column in result_df.columns
+            }
+
         save_table_safe(result_df, working_path)
+
         stale_paths = discard_redo_stack(db, project_id)
+
         step = models.UndoStep(
             project_id=project_id,
             status=models.UNDO_STEP_DONE,
-            entries=[{"action_type": action_type, "action_details": details} for action_type, details in entries],
+            entries=[
+                {
+                    "action_type": action_type,
+                    "action_details": details,
+                }
+                for action_type, details in entries
+            ],
             before_path=before_path,
+            metadata_before=metadata_before,
+            metadata_after=metadata_after,
         )
+
         db.add(step)
         db.flush()
-        _add_log_rows(db, project_id, entries, undo_step_id=step.id)
+
+        _add_log_rows(
+            db,
+            project_id,
+            entries,
+            undo_step_id=step.id,
+        )
+
+        replace_project_column_metadata(
+            db,
+            project_id,
+            metadata_after,
+        )
+
         _touch_project(db, project_id)
+
         stale_paths += enforce_undo_retention(db, project_id)
+
         db.commit()
+
     except Exception:
-        restored = restore_after_failure(before_path, working_path, project_id)
+        restored = restore_after_failure(
+            before_path,
+            working_path,
+            project_id,
+        )
         db.rollback()
+
         if restored:
             unlink_snapshots([before_path])
+
         raise
+
     unlink_snapshots(stale_paths)
 
 
@@ -342,10 +506,10 @@ def restore_after_failure(snapshot_path: str, working_path: str, project_id: uui
     """
     try:
         restore_snapshot(snapshot_path, working_path)
+        return True
     except Exception:
         logger.exception("Failed to restore working copy from its snapshot: project_id=%s", project_id)
         return False
-    return True
 
 
 def discard_redo_stack(db: Session, project_id: uuid.UUID) -> list[str]:
@@ -467,36 +631,59 @@ def get_redo_step(db: Session, project_id: uuid.UUID) -> models.UndoStep | None:
     )
 
 
-def mark_step_undone(db: Session, step: models.UndoStep, after_path: str) -> None:
-    """Stage moving a step onto the top of the redo stack, without committing.
-
-    Deletes the step's change-log rows (undone work is not applied work) and
-    records the snapshot redo will restore.
-    """
-    # "fetch" also drops the deleted rows from the session, so the caller's
-    # handle on the row it just undid cannot be flushed back.
+def mark_step_undone(
+    db: Session,
+    step: models.UndoStep,
+    after_path: str,
+) -> None:
+    """Stage moving a step onto the redo stack, without committing."""
     db.query(models.ProjectChangeLog).filter(models.ProjectChangeLog.undo_step_id == step.id).delete(
         synchronize_session="fetch"
     )
+
     top = (
         db.query(sa.func.max(models.UndoStep.undone_seq)).filter(models.UndoStep.project_id == step.project_id).scalar()
     )
+
     step.status = models.UNDO_STEP_UNDONE
     step.after_path = after_path
     step.undone_seq = (top or 0) + 1
+
+    if step.metadata_before is not None:
+        replace_project_column_metadata(
+            db,
+            step.project_id,
+            step.metadata_before,
+        )
+
     _touch_project(db, step.project_id)
 
 
-def mark_step_redone(db: Session, step: models.UndoStep) -> None:
-    """Stage re-applying a step, without committing.
-
-    Re-inserts its change-log rows in their original order, as unsaved rows.
-    """
+def mark_step_redone(
+    db: Session,
+    step: models.UndoStep,
+) -> None:
+    """Stage re-applying a step, without committing."""
     entries = [(entry["action_type"], entry["action_details"]) for entry in step.entries]
-    _add_log_rows(db, step.project_id, entries, undo_step_id=step.id)
+
+    _add_log_rows(
+        db,
+        step.project_id,
+        entries,
+        undo_step_id=step.id,
+    )
+
     step.status = models.UNDO_STEP_DONE
     step.after_path = None
     step.undone_seq = None
+
+    if step.metadata_after is not None:
+        replace_project_column_metadata(
+            db,
+            step.project_id,
+            step.metadata_after,
+        )
+
     _touch_project(db, step.project_id)
 
 
@@ -511,7 +698,11 @@ def create_checkpoint(db: Session, project_id: uuid.UUID, message: str) -> model
     Returns:
         The created Checkpoint model instance.
     """
-    checkpoint = models.Checkpoint(project_id=project_id, message=message)
+    checkpoint = models.Checkpoint(
+        project_id=project_id,
+        message=message,
+        metadata_snapshot=get_project_column_metadata(db, project_id),
+    )
     db.add(checkpoint)
     db.flush()  # Assigns ID before updating logs
 
@@ -885,9 +1076,13 @@ def reset_project(
                 synchronize_session="fetch"
             )
 
+            df = read_table_safe(str(working_path))
+            metadata = {str(column): map_dtype(dtype) for column, dtype in df.dtypes.items()}
+            replace_project_column_metadata(db, project_id, metadata)
+
             db.commit()
 
-        except SQLAlchemyError:
+        except Exception:
             db.rollback()
 
             # The database reset failed, so restore the previous dataset.
@@ -911,6 +1106,7 @@ def reset_project(
     df = read_table_safe(str(working_path))
     response_df, pagination = paginate_dataframe(df, page, page_size)
     resp = dataframe_to_response(response_df)
+    resp["dtypes"] = {str(column): map_dtype(dtype) for column, dtype in df.dtypes.items()}
 
     logger.info("Project reset: id=%s", project_id)
 
