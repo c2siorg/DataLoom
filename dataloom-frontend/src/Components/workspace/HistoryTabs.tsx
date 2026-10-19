@@ -54,7 +54,7 @@ export function LogsTab() {
 /** Checkpoints tab — lists checkpoints and handles revert/delete. */
 export function CheckpointsTab() {
   const { projectId } = useParams() as { projectId: string };
-  const { updateData, setPaginationData, page, pageSize } = useProjectContext();
+  const { updateData, setPaginationData, page, pageSize, columns } = useProjectContext();
   const { refreshLogs } = useHistoryRefresh();
   const { checkpointsToken } = useHistoryRefreshTokens();
   const [checkpoints, setCheckpoints] = useState<CheckpointEntry[] | null>(null);
@@ -117,6 +117,7 @@ export function CheckpointsTab() {
       <CheckpointsPanel
         projectId={projectId}
         checkpoints={checkpoints}
+        currentColumns={columns}
         onRevert={handleRevert}
         onCheckpointDeleted={fetchCheckpoints}
       />
