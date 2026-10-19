@@ -1,18 +1,23 @@
 import { act, render, waitFor } from "@testing-library/react";
-import { cloneElement, type ReactElement } from "react";
+import { cloneElement, type ComponentProps, type ReactElement } from "react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import type { ChartSpec } from "../../../api/visualizations";
 import { ThemeProvider, useTheme } from "../../../context/ThemeContext";
 import ChartRenderer from "../ChartRenderer";
 
 // ResponsiveContainer measures its parent, which jsdom lays out at 0×0, so the
-// chart would never mount; hand it a fixed size instead.
+// chart would never mount; hand it a fixed size instead. Pie sectors only mount
+// once the entry animation ticks, which made the slice test flaky under load,
+// so the pie is drawn without animation.
 vi.mock("recharts", async (importOriginal) => {
   const actual = await importOriginal<typeof import("recharts")>();
   return {
     ...actual,
     ResponsiveContainer: ({ children }: { children: ReactElement }) =>
       cloneElement(children, { width: 600, height: 320 }),
+    Pie: (props: ComponentProps<typeof actual.Pie>) => (
+      <actual.Pie {...props} isAnimationActive={false} />
+    ),
   };
 });
 
@@ -83,15 +88,11 @@ describe("ChartRenderer theming", () => {
   it("separates pie slices with the surface colour rather than white", async () => {
     const { container } = renderWithTheme(pie, "dark");
 
-    // Sectors mount once the entry animation starts.
-    const slice = await waitFor(
-      () => {
-        const path = container.querySelector(".recharts-pie-sector path");
-        expect(path).not.toBeNull();
-        return path;
-      },
-      { timeout: 3000 },
-    );
+    const slice = await waitFor(() => {
+      const path = container.querySelector(".recharts-pie-sector path");
+      expect(path).not.toBeNull();
+      return path;
+    });
     expect(slice).toHaveAttribute("stroke", "var(--app-surface)");
   });
 
