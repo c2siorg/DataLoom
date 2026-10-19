@@ -11,8 +11,9 @@ from sqlmodel import Session
 from app import database, models
 from app.config import get_settings
 from app.services import auth_service
+from app.services.project_service import get_project_column_metadata
 from app.utils.logging import get_logger
-from app.utils.pandas_helpers import read_table_safe
+from app.utils.pandas_helpers import read_table_safe, restore_semantic_dtypes
 from app.utils.project_locks import project_read_lock
 from app.utils.rate_limiter import RateLimiter
 
@@ -159,7 +160,7 @@ def get_project_or_404(
     return fetch_owned_project(db, project_id, current_user)
 
 
-def read_project_df(project: models.Project) -> pd.DataFrame:
+def read_project_df(project: models.Project, metadata: dict[str, str] | None = None) -> pd.DataFrame:
     """Read a project's working copy, redacting any path from error details.
 
     ``read_table_safe`` embeds the absolute file path in its 404/500 details;
@@ -171,7 +172,8 @@ def read_project_df(project: models.Project) -> pd.DataFrame:
     Unlocked callers should use :func:`load_project_df` instead.
     """
     try:
-        return read_table_safe(project.file_path)
+        df = read_table_safe(project.file_path)
+        return restore_semantic_dtypes(df, metadata) if metadata is not None else df
     except HTTPException as e:
         if e.status_code == 404:
             raise HTTPException(status_code=404, detail="Project data file not found") from e
@@ -179,7 +181,7 @@ def read_project_df(project: models.Project) -> pd.DataFrame:
         raise HTTPException(status_code=e.status_code, detail="Could not read project data") from e
 
 
-def load_project_df(project: models.Project) -> pd.DataFrame:
+def load_project_df(project: models.Project, db: Session | None = None) -> pd.DataFrame:
     """Read a project's working copy under the shared project read lock.
 
     The lock keeps the read from landing mid-write while a save, transform,
@@ -191,4 +193,5 @@ def load_project_df(project: models.Project) -> pd.DataFrame:
     profiling, visualization, reporting, quality, pipeline and append endpoints.
     """
     with project_read_lock(project.project_id):
-        return read_project_df(project)
+        metadata = get_project_column_metadata(db, project.project_id) if db is not None else None
+        return read_project_df(project, metadata)

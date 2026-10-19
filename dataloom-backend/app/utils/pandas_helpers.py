@@ -146,6 +146,70 @@ def map_dtype(dtype) -> str:
     return "unknown"
 
 
+def restore_semantic_dtypes(df: pd.DataFrame, metadata: dict[str, str]) -> pd.DataFrame:
+    """Restore persisted semantic column types after a file round trip.
+
+    CSV readers infer all-null columns as floats and nullable integers as
+    floats.  Metadata is therefore applied to the actual DataFrame at the
+    load boundary. A cast is accepted only when every non-null value can be
+    represented by the requested semantic type; invalid stored metadata raises
+    instead of returning a misleading dtype label.
+    """
+    restored = df.copy()
+    if not restored.columns.is_unique:
+        raise ValueError("Cannot restore semantic dtypes for duplicate column labels")
+
+    column_by_key = {str(column): column for column in restored.columns}
+    if len(column_by_key) != len(restored.columns):
+        raise ValueError("Column labels are ambiguous after metadata normalization")
+
+    for name, semantic_type in metadata.items():
+        column = column_by_key.get(str(name))
+        if column is None:
+            continue
+        series = restored[column]
+        try:
+            if semantic_type == "str":
+                converted = series.astype("string")
+            elif semantic_type == "int":
+                numeric = pd.to_numeric(series.replace(r"^\s*$", pd.NA, regex=True), errors="raise")
+                non_null = numeric.dropna()
+                if not non_null.empty and not (non_null % 1 == 0).all():
+                    raise ValueError("values are not integral")
+                converted = numeric.astype("Int64")
+            elif semantic_type == "float":
+                converted = pd.to_numeric(series.replace(r"^\s*$", pd.NA, regex=True), errors="raise").astype("Float64")
+            elif semantic_type == "bool":
+                truthy = {"true": True, "1": True, "yes": True, "y": True, "on": True}
+                falsy = {"false": False, "0": False, "no": False, "n": False, "off": False}
+
+                def parse_bool(value, true_values=truthy, false_values=falsy):
+                    if pd.isna(value):
+                        return pd.NA
+                    if isinstance(value, str) and not value.strip():
+                        return pd.NA
+                    if isinstance(value, bool):
+                        return value
+                    if value in (0, 1):
+                        return bool(value)
+                    key = str(value).strip().lower()
+                    if key in true_values:
+                        return True
+                    if key in false_values:
+                        return False
+                    raise ValueError(f"invalid boolean value {value!r}")
+
+                converted = series.map(parse_bool).astype("boolean")
+            elif semantic_type == "datetime":
+                converted = pd.to_datetime(series.replace(r"^\s*$", pd.NA, regex=True), errors="raise")
+            else:
+                continue
+        except (TypeError, ValueError, OverflowError) as exc:
+            raise ValueError(f"Cannot restore {semantic_type!r} dtype for column {name!r}: {exc}") from exc
+        restored[column] = converted
+    return restored
+
+
 _TIME_SUFFIX = (
     r"(?:[ T]\d{1,2}:\d{2}"
     r"(?::\d{2}(?:\.\d{1,6})?)?"

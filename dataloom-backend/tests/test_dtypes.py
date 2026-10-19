@@ -1,16 +1,20 @@
 """Tests for dtype mapping and dataframe_to_response dtypes field."""
 
 import random
+import uuid
 
 import pandas as pd
 import pytest
 
+from app import models
+from app.services.transformation_service import apply_metadata_transformation
 from app.utils.pandas_helpers import (
     _DATETIME_SAMPLE_SIZE,
     _infer_datetime_columns,
     _sample_rules_out_datetime,
     dataframe_to_response,
     map_dtype,
+    restore_semantic_dtypes,
 )
 
 
@@ -43,6 +47,202 @@ class TestMapDtype:
     def test_datetime_column(self):
         df = pd.DataFrame({"val": pd.to_datetime(["2024-01-01", "2024-06-15"])})
         assert map_dtype(df["val"].dtype) == "datetime"
+
+
+class TestSemanticDtypeRestoration:
+    def test_restores_all_null_string_column_as_nullable_string(self):
+        loaded = pd.DataFrame({"label": [float("nan"), float("nan")], "count": [1.0, 2.0]})
+
+        restored = restore_semantic_dtypes(loaded, {"label": "str", "count": "int"})
+
+        assert str(restored["label"].dtype) == "string"
+        assert restored["label"].isna().all()
+        assert str(restored["count"].dtype) == "Int64"
+
+    def test_rejects_values_that_cannot_be_safely_restored(self):
+        with pytest.raises(ValueError, match="Cannot restore 'int'"):
+            restore_semantic_dtypes(pd.DataFrame({"count": [1, "not an integer"]}), {"count": "int"})
+
+    def test_normalizes_non_string_column_labels(self):
+        restored = restore_semantic_dtypes(pd.DataFrame({1: [None]}), {"1": "str"})
+
+        assert str(restored[1].dtype) == "string"
+
+    def test_project_reload_restores_all_null_semantic_string(self, client, db):
+        uploaded = client.post(
+            "/projects/upload",
+            files={"file": ("nulls.csv", b"label\nNaN\nNaN\n", "text/csv")},
+            data={"projectName": "Null dtype", "projectDescription": "test"},
+        )
+        assert uploaded.status_code == 200, uploaded.text
+        project_id = uploaded.json()["project_id"]
+        row = (
+            db.query(models.ProjectColumnMetadata)
+            .filter_by(project_id=uuid.UUID(project_id), column_name="label")
+            .one()
+        )
+        row.column_dtype = "str"
+        db.commit()
+
+        response = client.get(f"/projects/get/{project_id}")
+
+        assert response.status_code == 200, response.text
+        assert response.json()["dtypes"]["label"] == "str"
+        assert response.json()["rows"] == [[None], [None]]
+
+    def test_metadata_initialization_failure_removes_upload_and_project(self, client, db, monkeypatch):
+        from app.api.endpoints import projects
+
+        original_store = projects.store_upload
+        stored_paths = []
+
+        def tracked_store(file):
+            paths = original_store(file)
+            stored_paths.extend(paths)
+            return paths
+
+        def fail_metadata(*_args, **_kwargs):
+            raise RuntimeError("metadata insert failed")
+
+        monkeypatch.setattr(projects, "store_upload", tracked_store)
+        monkeypatch.setattr(projects, "create_project_column_metadata", fail_metadata)
+        projects_before = db.query(models.Project).count()
+
+        with pytest.raises(RuntimeError, match="metadata insert failed"):
+            client.post(
+                "/projects/upload",
+                files={"file": ("upload-failure.csv", b"label\ntext\n", "text/csv")},
+                data={"projectName": "No orphan", "projectDescription": "test"},
+            )
+
+        assert db.query(models.Project).count() == projects_before
+        assert stored_paths
+        assert all(not path.exists() for path in stored_paths)
+
+    def test_checkpoint_revert_restores_semantic_dtype_snapshot(self, client, db):
+        uploaded = client.post(
+            "/projects/upload",
+            files={"file": ("checkpoint.csv", b"label\nNaN\nNaN\n", "text/csv")},
+            data={"projectName": "Checkpoint dtype", "projectDescription": "test"},
+        )
+        assert uploaded.status_code == 200, uploaded.text
+        project_id = uuid.UUID(uploaded.json()["project_id"])
+        row = db.query(models.ProjectColumnMetadata).filter_by(project_id=project_id, column_name="label").one()
+        row.column_dtype = "str"
+        db.commit()
+
+        renamed = client.post(
+            f"/projects/{project_id}/transform",
+            json={"operation_type": "renameCol", "rename_col_params": {"col_index": 0, "new_name": "renamed"}},
+        )
+        assert renamed.status_code == 200, renamed.text
+        saved = client.post(f"/projects/{project_id}/save", params={"commit_message": "string checkpoint"})
+        assert saved.status_code == 200, saved.text
+        checkpoint = db.query(models.Checkpoint).filter_by(project_id=project_id).one()
+        assert checkpoint.metadata_snapshot == {"renamed": "str"}
+
+        cast = client.post(
+            f"/projects/{project_id}/transform",
+            json={
+                "operation_type": "castDataType",
+                "cast_data_type_params": {"column": "renamed", "target_type": "float"},
+            },
+        )
+        assert cast.status_code == 200, cast.text
+
+        reverted = client.post(f"/projects/{project_id}/revert", params={"checkpoint_id": str(checkpoint.id)})
+
+        assert reverted.status_code == 200, reverted.text
+        assert reverted.json()["dtypes"]["renamed"] == "str"
+        assert reverted.json()["rows"] == [[None], [None]]
+
+    def test_legacy_project_backfills_metadata_before_undoable_change(self, client, db):
+        uploaded = client.post(
+            "/projects/upload",
+            files={"file": ("legacy.csv", b"name,age\nA,20\n", "text/csv")},
+            data={"projectName": "Legacy metadata", "projectDescription": "test"},
+        )
+        assert uploaded.status_code == 200, uploaded.text
+        project_id = uuid.UUID(uploaded.json()["project_id"])
+        db.query(models.ProjectColumnMetadata).filter_by(project_id=project_id).delete()
+        db.commit()
+
+        changed = client.post(
+            f"/projects/{project_id}/transform",
+            json={"operation_type": "addRow", "row_params": {"index": 0}},
+        )
+
+        assert changed.status_code == 200, changed.text
+        backfilled = {
+            row.column_name: row.column_dtype
+            for row in db.query(models.ProjectColumnMetadata).filter_by(project_id=project_id).all()
+        }
+        assert backfilled == {"name": "str", "age": "int"}
+        assert client.post(f"/projects/{project_id}/undo").status_code == 200
+        assert {
+            row.column_name: row.column_dtype
+            for row in db.query(models.ProjectColumnMetadata).filter_by(project_id=project_id).all()
+        } == backfilled
+        assert client.post(f"/projects/{project_id}/redo").status_code == 200
+
+
+class TestMetadataReconciliation:
+    def test_rename_moves_semantic_dtype(self):
+        before = pd.DataFrame({"old": pd.Series([None, None], dtype="string")})
+        after = before.rename(columns={"old": "new"})
+
+        result = apply_metadata_transformation(
+            {"old": "str"},
+            "renameCol",
+            {"rename_col_params": {"col_index": 0, "new_name": "new"}},
+            before,
+            after,
+        )
+
+        assert result == {"new": "str"}
+
+    def test_add_empty_column_uses_established_string_semantics(self):
+        before = pd.DataFrame({"id": [1]})
+        after = before.assign(label=None)
+
+        result = apply_metadata_transformation(
+            {"id": "int"},
+            "addCol",
+            {"add_col_params": {"index": 1, "name": "label"}},
+            before,
+            after,
+        )
+
+        assert result == {"id": "int", "label": "str"}
+
+    def test_fill_updates_semantic_dtype_when_all_null_string_becomes_numeric(self):
+        before = pd.DataFrame({"value": pd.Series([None, None], dtype="string")})
+        after = pd.DataFrame({"value": [1.0, 2.0]})
+
+        result = apply_metadata_transformation(
+            {"value": "str"},
+            "fillEmpty",
+            {"fill_empty_params": {"fill_value": 1, "index": 0, "strategy": "custom"}},
+            before,
+            after,
+        )
+
+        assert result == {"value": "float"}
+
+    def test_melt_reconciles_schema_and_removes_stale_column_metadata(self):
+        before = pd.DataFrame({"id": [1, 2], "left": ["a", "b"], "right": ["c", "d"]})
+        after = before.melt(id_vars=["id"], var_name="variable", value_name="value")
+
+        result = apply_metadata_transformation(
+            {"id": "int", "left": "str", "right": "str"},
+            "melt",
+            {"melt_params": {"id_vars": ["id"], "value_vars": ["left", "right"]}},
+            before,
+            after,
+        )
+
+        assert set(result) == {"id", "variable", "value"}
+        assert result == {"id": "int", "variable": "str", "value": "str"}
 
 
 class TestDataframeToResponse:
