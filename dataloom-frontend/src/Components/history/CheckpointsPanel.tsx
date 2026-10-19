@@ -1,13 +1,15 @@
 import { useState } from "react";
 import { deleteCheckpoint, type Checkpoint } from "../../api";
-import Modal from "../common/Modal";
 import { useToast } from "../../context/ToastContext";
 import Button from "../common/Button";
 import EmptyState from "../common/EmptyState";
+import Modal from "../common/Modal";
+import DatasetComparisonModal from "./DatasetComparisonModal";
 
 interface CheckpointsPanelProps {
   projectId: string;
   checkpoints?: Checkpoint[] | null;
+  currentColumns: string[];
   onRevert: (checkpointId: string) => void;
   onCheckpointDeleted: () => Promise<void> | void;
 }
@@ -15,17 +17,18 @@ interface CheckpointsPanelProps {
 const CheckpointsPanel = ({
   projectId,
   checkpoints,
+  currentColumns,
   onRevert,
   onCheckpointDeleted,
 }: CheckpointsPanelProps) => {
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+  const [comparisonCheckpointId, setComparisonCheckpointId] = useState<string | null>(null);
   const { showToast } = useToast();
-
   const hasCheckpoints = Array.isArray(checkpoints) && checkpoints.length > 0;
 
   const handleDeleteConfirm = async () => {
+    if (!confirmDeleteId) return;
     try {
-      if (!confirmDeleteId) return;
       await deleteCheckpoint(projectId, confirmDeleteId);
       showToast("Checkpoint deleted successfully", "success");
       await onCheckpointDeleted();
@@ -61,14 +64,21 @@ const CheckpointsPanel = ({
                   className="border-b border-app-border hover:bg-surface-hover transition-colors duration-150"
                 >
                   <td className="py-3 px-4 text-sm text-foreground">{checkpoint.message}</td>
+
                   <td className="py-3 px-4 text-sm text-muted-foreground">
                     {new Date(checkpoint.created_at).toLocaleString()}
                   </td>
+
                   <td className="py-3 px-4 text-center">
                     <div className="flex items-center justify-center gap-2">
+                      <Button size="sm" onClick={() => setComparisonCheckpointId(checkpoint.id)}>
+                        Compare
+                      </Button>
+
                       <Button size="sm" onClick={() => onRevert(checkpoint.id)}>
                         Revert
                       </Button>
+
                       <Button
                         size="sm"
                         variant="danger"
@@ -103,11 +113,19 @@ const CheckpointsPanel = ({
           <Button variant="secondary" onClick={() => setConfirmDeleteId(null)}>
             Cancel
           </Button>
+
           <Button variant="danger" onClick={handleDeleteConfirm}>
             Delete
           </Button>
         </div>
       </Modal>
+
+      <DatasetComparisonModal
+        projectId={projectId}
+        checkpointId={comparisonCheckpointId}
+        currentColumns={currentColumns}
+        onClose={() => setComparisonCheckpointId(null)}
+      />
     </div>
   );
 };
