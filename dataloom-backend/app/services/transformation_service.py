@@ -868,6 +868,9 @@ def group_by(df: pd.DataFrame, columns: list[str], agg_column: str, agg_function
     if missing:
         raise TransformationError(f"Columns {missing} not found in dataset")
 
+    if agg_column in columns:
+        raise TransformationError(f"Aggregation column '{agg_column}' cannot also be a group-by column")
+
     valid_functions = {"sum", "mean", "count", "min", "max", "median"}
     if agg_function not in valid_functions:
         raise TransformationError(f"Unsupported aggregation function: {agg_function}. Use: {valid_functions}")
