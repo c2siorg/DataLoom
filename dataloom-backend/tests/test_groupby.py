@@ -69,3 +69,7 @@ class TestGroupBy:
     def test_invalid_function(self, sample_df):
         with pytest.raises(TransformationError, match="Unsupported"):
             group_by(sample_df, ["department"], "salary", "invalid_func")
+
+    def test_agg_column_also_grouped(self, sample_df):
+        with pytest.raises(TransformationError, match="cannot also be a group-by column"):
+            group_by(sample_df, ["department"], "department", "count")
